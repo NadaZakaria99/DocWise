@@ -28,6 +28,25 @@
 **Robust Retrieval System:** Developed a retrieval mechanism that blends document-based answers with web search results for accurate, comprehensive responses.
 **Solving the Agreement Trap:** Created a solution that unlocks the value of agreement data through AI and automation, empowering businesses to make smarter decisions.
 
+# How to Use
+- **Set Up API Keys:**
+  - Obtain API keys for Google Gemini, DocuSign, and Tavily.
+  - Replace the placeholders in the code with your actual API keys
+- **Run the Application:**
+  - Clone the repository and install dependencies:
+    
+    pip install -r requirements.txt
+  - Run the Gradio app:
+    python DocWise.py
+- **Upload a PDF Agreement:**
+  Use the file upload button to upload a PDF agreement.
+- **Summarize the Agreement:**
+  The system will automatically extract and summarize the key points using Google Gemini.
+- **Ask Questions:**
+  Use the chatbot tab to ask questions about the agreement. The system will provide answers based on the document content or perform a web search if needed.
+- **Send for Signing:**
+  Enter the recipient’s email and name, then click "Process Agreement" to send the document for signing via DocuSign.
+
 # 📚What we learned
 - The importance of prompt engineering when working with large language models like Gemini to achieve accurate and relevant outputs.
 - How to effectively use embeddings and retrieval mechanisms to enhance question-answering systems.
@@ -38,3 +57,6 @@
 - **Multi-Language Support:** Expanding DocWise's capabilities to support multiple languages, making it accessible to a global audience and enabling users to analyze agreements in their preferred language.
 - **Risk Presentation:** Introducing a feature that identifies and presents potential risks within agreements, helping users make more informed decisions and mitigate potential issues before they arise.
 - **Streaming Responses:** Providing streaming responses for real-time interaction with the chatbot, improving user engagement and satisfaction.
+
+# 📝License
+DocWise is licensed under the MIT License
