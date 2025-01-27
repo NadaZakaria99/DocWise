@@ -8,4 +8,6 @@ langchain-google-genai
 faiss-cpu 
 langchain
 langchain-community
+langchain-core
 sentence_transformers
+tavily-python
