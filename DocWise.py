@@ -6,9 +6,12 @@ import google.generativeai as genai
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer, util
 import numpy as np
+import os
+from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_core.documents import Document
 
 # Configure Google Generative AI
-api_key = "Replace with your actual Gemini API key"  
+api_key = "Replace with your actual API key"  
 genai.configure(api_key=api_key)
 
 # Create the Gemini model
@@ -75,7 +78,9 @@ def summarize_agreement_with_gemini(text):
     except Exception as e:
         return f"Error summarizing text with Gemini: {e}"
 
-# Function to generate response using RAG
+# Configure Tavily API
+os.environ["TAVILY_API_KEY"] = "Replace with your Tavily API"
+web_search_tool = TavilySearchResults(k=3)
 def generate_response_with_rag(query, pdf_path, state):
     if "chunks" not in state or "embeddings" not in state or "embedding_model" not in state:
         text = extract_text_from_pdf(pdf_path)
@@ -89,17 +94,75 @@ def generate_response_with_rag(query, pdf_path, state):
         embeddings = state["embeddings"]
         embedding_model = state["embedding_model"]
 
-    relevant_chunks = retrieve_relevant_chunks(query, chunks, embeddings, embedding_model)
-    context = "\n\n".join(relevant_chunks)
-    augmented_query = f"Context:\n{context}\n\nQuestion: {query}\n\nAnswer:"
-    response = chat_session.send_message(augmented_query)
-    return response.text
+    # Retrieve relevant chunks based on the query
+    relevant_chunks = retrieve_relevant_chunks(query, chunks, embeddings, embedding_model, top_k=5)  # Increase top_k
+    
+    # Debug: Print relevant chunks
+    print(f"Relevant Chunks: {relevant_chunks}")
 
+    # Combine the relevant chunks into a single context
+    context = "\n\n".join(relevant_chunks)
+
+    # Debug: Print the context
+    print(f"Context from PDF: {context}")
+
+    # Create a prompt that instructs the model to answer only from the context
+    prompt = f"""
+    You are a helpful assistant that answers questions based on the provided context. 
+    Use the context below to answer the question. If the context does not contain enough information to answer the question, respond with "I don't know."
+    **Context:**
+    {context}
+    **Question:**
+    {query}
+    **Answer:**
+    """
+
+    # Debug: Print the prompt
+    print(f"Prompt for Gemini: {prompt}")
+
+    # Send the prompt to the Gemini model
+    try:
+        response = chat_session.send_message(prompt)
+        initial_answer = response.text
+
+        # Check if the initial answer is "I don't know"
+        if "I don't know" in initial_answer or "i don't know" in initial_answer:
+            print("Initial answer is 'I don't know'. Performing web search...")
+            docs = web_search_tool.invoke({"query": query})
+            web_results = "\n".join([d["content"] for d in docs])
+            web_results = Document(page_content=web_results)
+            
+            # Debug: Print web search results
+            print(f"Web Search Results: {web_results.page_content}")
+
+            # Create a prompt that instructs the model to answer from the web search results
+            web_prompt = f"""
+            You are a helpful assistant that answers questions based on the provided context. 
+            The context below is from a web search. Use the context to answer the question. If the context does not contain enough information to answer the question, respond with "I don't know."
+            
+            **Context:**
+            {web_results.page_content}
+            **Question:**
+            {query}
+            **Answer:**
+            """
+            
+            # Debug: Print the prompt
+            print(f"Prompt for Gemini (Web Search): {web_prompt}")
+
+            # Send the prompt to the Gemini model
+            web_response = chat_session.send_message(web_prompt)
+            # Add a note indicating the answer is based on a web search
+            return f"{web_response.text}\n\n*Note: This answer is based on a web search.*"
+        else:
+            return initial_answer
+    except Exception as e:
+        return f"Error generating response: {e}"
 # Function to send document to DocuSign
 def send_to_docusign(file_path, recipient_email, recipient_name):
-    docusign_api_key = "your_docusign_api_key"
-    account_id = "your_account_id"
-    base_url = "https://demo.docusign.net/restapi"
+    docusign_api_key = "Replace with your access_token"
+    account_id = "Replace with your account_id"
+    base_url = "Replace with your base_url"
 
     with open(file_path, "rb") as file:
         document_base64 = base64.b64encode(file.read()).decode()
@@ -200,36 +263,30 @@ css = """
     background-position: center;
     background-repeat: no-repeat;
 }
-
 .gradio-container h1, 
 .gradio-container .tabs > .tab-nav > .tab-button {
     color: #FFF5E1 !important;
     text-shadow: 0 0 5px rgba(255, 245, 225, 0.5);
 }
-
 .tabs {
     background-color: #f0f0f0 !important;
     border-radius: 10px !important;
     padding: 20px !important;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1) !important;
 }
-
 .tabs > .tab-nav {
     background-color: #e0e0e0 !important;
     border-radius: 5px !important;
     margin-bottom: 15px !important;
 }
-
 .tabs > .tab-nav > .tab-button {
     color: black !important;
     font-weight: bold !important;
 }
-
 .tabs > .tab-nav > .tab-button.selected {
     background-color: #d0d0d0 !important;
     color: black !important;
 }
-
 #process-button, #chatbot-button {
     background-color: white !important;
     color: black !important;
@@ -239,7 +296,6 @@ css = """
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !important;
     transition: background-color 0.3s ease !important;
 }
-
 #process-button:hover, #chatbot-button:hover {
     background-color: #f0f0f0 !important;
 }
@@ -251,7 +307,7 @@ with gr.Blocks(css=css) as app:
         """
     <div style="text-align: center;">
         <h1 id="main-title">
-            Agreement Analyzer with Chatbot and Docusign Integration
+            DocWise(Agreement Analyzer with Chatbot and Docusign Integration)
         </h1>
     </div>
         """,
