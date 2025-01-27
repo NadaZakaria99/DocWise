@@ -28,7 +28,7 @@
 **Robust Retrieval System:** Developed a retrieval mechanism that blends document-based answers with web search results for accurate, comprehensive responses.
 **Solving the Agreement Trap:** Created a solution that unlocks the value of agreement data through AI and automation, empowering businesses to make smarter decisions.
 
-# How to Use
+# 🚀How to Use
 - **Set Up API Keys:**
   - Obtain API keys for Google Gemini, DocuSign, and Tavily.
   - Replace the placeholders in the code with your actual API keys
