@@ -8,7 +8,7 @@ from sentence_transformers import SentenceTransformer, util
 import numpy as np
 
 # Configure Google Generative AI
-api_key = "AIzaSyAt9uhJV-dIwqdndTz5V4K8ixW7__0C7Ao"  # Replace with your actual API key
+api_key = "Replace with your actual Gemini API key"  
 genai.configure(api_key=api_key)
 
 # Create the Gemini model
@@ -97,8 +97,8 @@ def generate_response_with_rag(query, pdf_path, state):
 
 # Function to send document to DocuSign
 def send_to_docusign(file_path, recipient_email, recipient_name):
-    docusign_api_key = "eyJ0eXAiOiJNVCIsImFsZyI6IlJTMjU2Iiwia2lkIjoiNjgxODVmZjEtNGU1MS00Y2U5LWFmMWMtNjg5ODEyMjAzMzE3In0.AQoAAAABAAUABwCAceXAcD7dSAgAgLEIz7M-3UgCAOlO8Y4SurZKuV6S5XinyP8VAAEAAAAYAAIAAAAFAAAAHQAAAA0AJAAAADAwZTc4NzI1LTI5NzItNDkwMS1iOWQxLThhYWY3MjllN2JmZCIAJAAAADAwZTc4NzI1LTI5NzItNDkwMS1iOWQxLThhYWY3MjllN2JmZDAAgEY3U2w-3Ug3ANsGGOe0MuhFnvTaUOPDR9o.DzQmnFZZpXlwhKPpoNm64DXNbb6fKYElmTgE1k4Nxz2vJCgSpVzEYcen9U6th5rjh2J_HuUWQR2tjHT8IMoh4q-u93LhCMkhvb9_E7bEfwpO5m2-yR6jXsOEZBvCO8qhdVyU23SA0A1vDyVHOr1QUaSLk7ldgmRUz0vWp1W-L6lPCMDfE4uNd3GnAJT-eM6PZ7kWPtgiHehsEPOPeF4xTVvKY-_kBIDD2sQmB6SntSrqq5FzTbPcKjMqo_6yhN0ecTmvZ5RS-cxkH-GTVQptrxo8B6MgUNP99Muj7aJdSzyHdZF5Mih5qU3omLOtklAVThE_gradogh3Qq1ITKA0Hg"
-    account_id = "184d0409-2626-4c48-98b5-d383b9854a47"
+    docusign_api_key = "your_docusign_api_key"
+    account_id = "your_account_id"
     base_url = "https://demo.docusign.net/restapi"
 
     with open(file_path, "rb") as file:
