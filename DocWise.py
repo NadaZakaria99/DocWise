@@ -2,99 +2,108 @@ import base64
 import requests
 import gradio as gr
 import PyPDF2
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM
+import google.generativeai as genai
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from sentence_transformers import SentenceTransformer, util
+import numpy as np
 
-# Load BART model for summarization
-summarization_tokenizer = AutoTokenizer.from_pretrained("facebook/bart-large-cnn")
-summarization_model = AutoModelForSeq2SeqLM.from_pretrained("facebook/bart-large-cnn")
+# Configure Google Generative AI
+api_key = "AIzaSyAt9uhJV-dIwqdndTz5V4K8ixW7__0C7Ao"  # Replace with your actual API key
+genai.configure(api_key=api_key)
 
-# Load DeepSeek model for chatbot
-chatbot_tokenizer = AutoTokenizer.from_pretrained("deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B")
-chatbot_model = AutoModelForCausalLM.from_pretrained("deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B")
+# Create the Gemini model
+generation_config = {
+    "temperature": 0.7,
+    "top_p": 0.95,
+    "top_k": 64,
+    "max_output_tokens": 65536,
+    "response_mime_type": "text/plain",
+}
+
+model = genai.GenerativeModel(
+    model_name="gemini-2.0-flash-thinking-exp-01-21",
+    generation_config=generation_config,
+)
+
+chat_session = model.start_chat(history=[])
 
 # Function to extract text from a PDF
 def extract_text_from_pdf(file_path):
     try:
         with open(file_path, "rb") as file:
             reader = PyPDF2.PdfReader(file)
-            text = ""
-            for page in reader.pages:
-                text += page.extract_text()
+            text = "".join(page.extract_text() for page in reader.pages)
         return text
     except Exception as e:
         return f"Error extracting text from PDF: {e}"
 
-# Function to split text into chunks
-def chunk_text(text, chunk_size=500):
-    words = text.split()
-    chunks = []
-    for i in range(0, len(words), chunk_size):
-        chunk = " ".join(words[i:i + chunk_size])
-        chunks.append(chunk)
+# Function to chunk the text
+def chunk_text(text, chunk_size=500, chunk_overlap=50):
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        length_function=len
+    )
+    chunks = text_splitter.split_text(text)
     return chunks
 
-# Function to summarize the agreement using BART
-def summarize_agreement(text):
-    inputs = summarization_tokenizer(text, return_tensors="pt", max_length=1024, truncation=True)
-    outputs = summarization_model.generate(**inputs, max_new_tokens=200)
-    summary = summarization_tokenizer.decode(outputs[0], skip_special_tokens=True)
-    return summary
+# Function to embed the chunks
+def embed_chunks(chunks, model_name="all-MiniLM-L6-v2"):
+    model = SentenceTransformer(model_name)
+    embeddings = model.encode(chunks, convert_to_tensor=True)
+    return embeddings, model
 
-# Function to retrieve the most relevant chunk for a question
-def retrieve_relevant_chunk(chunks, question):
-    # Simple retrieval: Find the chunk with the most overlapping words
-    question_words = set(question.lower().split())
-    best_chunk = None
-    best_score = 0
-    for chunk in chunks:
-        chunk_words = set(chunk.lower().split())
-        overlap = len(question_words.intersection(chunk_words))
-        if overlap > best_score:
-            best_chunk = chunk
-            best_score = overlap
-    return best_chunk
+# Function to retrieve relevant chunks
+def retrieve_relevant_chunks(query, chunks, embeddings, model, top_k=3):
+    query_embedding = model.encode(query, convert_to_tensor=True)
+    similarities = util.cos_sim(query_embedding, embeddings)[0]
+    top_k = min(top_k, len(chunks))
+    top_indices = np.argsort(similarities.cpu().numpy())[-top_k:][::-1]
+    relevant_chunks = [chunks[i] for i in top_indices]
+    return relevant_chunks
 
-# Function to answer user questions using DeepSeek
-def chatbot(text, question):
-    # Step 1: Split the text into chunks
-    chunks = chunk_text(text)
+# Function to summarize the agreement using Gemini
+def summarize_agreement_with_gemini(text):
+    try:
+        # Create a prompt for summarization
+        prompt = f"Summarize the following text in 3-5 sentences:\n\n{text}\n\nSummary:"
+        
+        # Send the prompt to the Gemini model
+        response = chat_session.send_message(prompt)
+        
+        return response.text
+    except Exception as e:
+        return f"Error summarizing text with Gemini: {e}"
 
-    # Step 2: Retrieve the most relevant chunk
-    relevant_chunk = retrieve_relevant_chunk(chunks, question)
+# Function to generate response using RAG
+def generate_response_with_rag(query, pdf_path, state):
+    if "chunks" not in state or "embeddings" not in state or "embedding_model" not in state:
+        text = extract_text_from_pdf(pdf_path)
+        chunks = chunk_text(text)
+        embeddings, embedding_model = embed_chunks(chunks)
+        state["chunks"] = chunks
+        state["embeddings"] = embeddings
+        state["embedding_model"] = embedding_model
+    else:
+        chunks = state["chunks"]
+        embeddings = state["embeddings"]
+        embedding_model = state["embedding_model"]
 
-    # Step 3: Generate an answer using DeepSeek
-    prompt = f"""
-    Relevant Text:
-    {relevant_chunk}
-
-    Question:
-    {question}
-
-    Provide a concise and direct answer to the question. Do not add unnecessary commentary.
-
-    Answer:
-    """
-
-    inputs = chatbot_tokenizer(prompt, return_tensors="pt", max_length=2048, truncation=True)
-    outputs = chatbot_model.generate(**inputs, max_new_tokens=200)
-    answer = chatbot_tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-    # Post-process the answer to remove unnecessary commentary
-    answer = answer.split("Answer:")[-1].strip()  # Remove the prompt
-    return answer
+    relevant_chunks = retrieve_relevant_chunks(query, chunks, embeddings, embedding_model)
+    context = "\n\n".join(relevant_chunks)
+    augmented_query = f"Context:\n{context}\n\nQuestion: {query}\n\nAnswer:"
+    response = chat_session.send_message(augmented_query)
+    return response.text
 
 # Function to send document to DocuSign
 def send_to_docusign(file_path, recipient_email, recipient_name):
-    # DocuSign API credentials (replace with your actual credentials)
-    docusign_api_key = "eyJ0eXAiOiJNVCIsImFsZyI6IlJTMjU2Iiwia2lkIjoiNjgxODVmZjEtNGU1MS00Y2U5LWFmMWMtNjg5ODEyMjAzMzE3In0.AQoAAAABAAUABwCAUarwaj3dSAgAgJHN_q093UgCAOlO8Y4SurZKuV6S5XinyP8VAAEAAAAYAAIAAAAFAAAAHQAAAA0AJAAAADE5MjE2ZWM5LTBlYzYtNGUzNi1hZmRjLTI0YmYxYWMxZTlmNCIAJAAAADE5MjE2ZWM5LTBlYzYtNGUzNi1hZmRjLTI0YmYxYWMxZTlmNDAAgPgpoFg93Ug3ANsGGOe0MuhFnvTaUOPDR9o.av_Lw8n-1NzH4xLey3n-nCRmgsbN9hPHPMfd7FIRUemL5gIAYoYz5MWdGrF40b2hMnpqWzRjZwJmbFjwUaDujfF4307Tn7gSLeUHRDNSKVoUPasUEHdaZum_PY94s4jMnupQgT7LvU5aqqHFEdrOqBgjQfxMjpUT4HeMveeln4REjXXQrrQzDlmGgxIMGta3YKx5swmfey_bqwjf2ODmm7sviFXxePRmcNWIvyPoE8DkfogVVCWEwarz1p7yZ_OofPU8kUwCw2dJePiDaL0rVKdOGbDTSM5AxrZ7vXr5ap3xurs9yYpaqCOxk8jlNC7wQSULRZxv4qpAwAJTGvPiKA"  # Replace with your OAuth token
-    account_id = "184d0409-2626-4c48-98b5-d383b9854a47"  # API Account ID
-    base_url = "https://demo.docusign.net/restapi"  # Account Base URL + /restapi
+    docusign_api_key = "eyJ0eXAiOiJNVCIsImFsZyI6IlJTMjU2Iiwia2lkIjoiNjgxODVmZjEtNGU1MS00Y2U5LWFmMWMtNjg5ODEyMjAzMzE3In0.AQoAAAABAAUABwCAceXAcD7dSAgAgLEIz7M-3UgCAOlO8Y4SurZKuV6S5XinyP8VAAEAAAAYAAIAAAAFAAAAHQAAAA0AJAAAADAwZTc4NzI1LTI5NzItNDkwMS1iOWQxLThhYWY3MjllN2JmZCIAJAAAADAwZTc4NzI1LTI5NzItNDkwMS1iOWQxLThhYWY3MjllN2JmZDAAgEY3U2w-3Ug3ANsGGOe0MuhFnvTaUOPDR9o.DzQmnFZZpXlwhKPpoNm64DXNbb6fKYElmTgE1k4Nxz2vJCgSpVzEYcen9U6th5rjh2J_HuUWQR2tjHT8IMoh4q-u93LhCMkhvb9_E7bEfwpO5m2-yR6jXsOEZBvCO8qhdVyU23SA0A1vDyVHOr1QUaSLk7ldgmRUz0vWp1W-L6lPCMDfE4uNd3GnAJT-eM6PZ7kWPtgiHehsEPOPeF4xTVvKY-_kBIDD2sQmB6SntSrqq5FzTbPcKjMqo_6yhN0ecTmvZ5RS-cxkH-GTVQptrxo8B6MgUNP99Muj7aJdSzyHdZF5Mih5qU3omLOtklAVThE_gradogh3Qq1ITKA0Hg"
+    account_id = "184d0409-2626-4c48-98b5-d383b9854a47"
+    base_url = "https://demo.docusign.net/restapi"
 
-    # Prepare the document
     with open(file_path, "rb") as file:
         document_base64 = base64.b64encode(file.read()).decode()
 
-    # Create the envelope
     envelope_definition = {
         "emailSubject": "Please sign this document",
         "documents": [
@@ -127,7 +136,6 @@ def send_to_docusign(file_path, recipient_email, recipient_name):
         "status": "sent"
     }
 
-    # Send the request
     headers = {
         "Authorization": f"Bearer {docusign_api_key}",
         "Content-Type": "application/json"
@@ -138,80 +146,132 @@ def send_to_docusign(file_path, recipient_email, recipient_name):
             headers=headers,
             json=envelope_definition
         )
-        response.raise_for_status()  # Raise an error for bad status codes
+        response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
         return {"error": str(e)}
 
 # Function to process the agreement
-def process_agreement(file, recipient_email, recipient_name):
+def process_agreement(file, recipient_email, recipient_name, state):
     try:
-        # Step 1: Extract text from PDF
         text = extract_text_from_pdf(file.name)
         if text.startswith("Error"):
-            return text, {}, {}  # Return error message if text extraction fails
+            return text, {}, {}, state
 
-        # Step 2: Summarize the agreement
-        summary = summarize_agreement(text)
+        # Use Gemini for summarization
+        summary = summarize_agreement_with_gemini(text)
         if summary.startswith("Error"):
-            return summary, {}, {}  # Return error message if summarization fails
+            return summary, {}, {}, state
 
-        # Step 3: Send the document to DocuSign
         docusign_response = send_to_docusign(file.name, recipient_email, recipient_name)
         if "error" in docusign_response:
-            return summary, {}, docusign_response  # Return DocuSign error if API call fails
+            return summary, {}, docusign_response, state
 
-        return summary, {}, docusign_response
+        return summary, {}, docusign_response, state
     except Exception as e:
-        return f"Error: {e}", {}, {}
+        return f"Error: {e}", {}, {}, state
 
 # Gradio interface
 def main_interface(file, recipient_email, recipient_name, question, state):
-    # Store the uploaded file and extracted text in the state
     if file is not None:
         state["file"] = file
         state["text"] = extract_text_from_pdf(file.name)
+        state["chat_history"] = []  # Initialize chat history
 
-    # Initialize outputs
     summary_output = ""
     docusign_output = {}
     chatbot_output = ""
 
-    # If the file is uploaded, process it
     if "file" in state:
-        # Agreement Processing Tab
         if recipient_email and recipient_name:
-            summary_output, _, docusign_output = process_agreement(state["file"], recipient_email, recipient_name)
+            summary_output, _, docusign_output, state = process_agreement(state["file"], recipient_email, recipient_name, state)
 
-        # Chatbot Tab
         if question:
-            chatbot_output = chatbot(state["text"], question)
+            chatbot_output = generate_response_with_rag(question, state["file"].name, state)
+            state["chat_history"].append((question, chatbot_output))  # Update chat history
 
     return summary_output, docusign_output, chatbot_output, state
 
+# CSS for styling
+css = """
+.gradio-container {
+    background-image: url('https://huggingface.co/spaces/Nadaazakaria/DocWise/resolve/main/DALL%C2%B7E%202025-01-26%2011.43.33%20-%20A%20futuristic%20and%20sleek%20magical%20animated%20GIF-style%20icon%20design%20for%20%27DocWise%27%2C%20representing%20knowledge%2C%20documents%2C%20and%20wisdom.%20The%20design%20includes%20a%20glow.jpg');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+}
+
+.gradio-container h1, 
+.gradio-container .tabs > .tab-nav > .tab-button {
+    color: #FFF5E1 !important;
+    text-shadow: 0 0 5px rgba(255, 245, 225, 0.5);
+}
+
+.tabs {
+    background-color: #f0f0f0 !important;
+    border-radius: 10px !important;
+    padding: 20px !important;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1) !important;
+}
+
+.tabs > .tab-nav {
+    background-color: #e0e0e0 !important;
+    border-radius: 5px !important;
+    margin-bottom: 15px !important;
+}
+
+.tabs > .tab-nav > .tab-button {
+    color: black !important;
+    font-weight: bold !important;
+}
+
+.tabs > .tab-nav > .tab-button.selected {
+    background-color: #d0d0d0 !important;
+    color: black !important;
+}
+
+#process-button, #chatbot-button {
+    background-color: white !important;
+    color: black !important;
+    border: 1px solid #ccc !important;
+    padding: 10px 20px !important;
+    border-radius: 5px !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !important;
+    transition: background-color 0.3s ease !important;
+}
+
+#process-button:hover, #chatbot-button:hover {
+    background-color: #f0f0f0 !important;
+}
+"""
+
 # Gradio app
-with gr.Blocks() as app:
-    gr.Markdown("# Agreement Analyzer with Chatbot and Docusign Integration")
+with gr.Blocks(css=css) as app:
+    gr.Markdown(
+        """
+    <div style="text-align: center;">
+        <h1 id="main-title">
+            Agreement Analyzer with Chatbot and Docusign Integration
+        </h1>
+    </div>
+        """,
+    )
 
-    # State to store the uploaded file and extracted text
     state = gr.State({})
-
-    # File upload (shared between tabs)
     file_input = gr.File(label="Upload Agreement (PDF)")
 
-    with gr.Tab("Agreement Processing"):
+    with gr.Tab("Agreement Processing", elem_id="agreement-tab"):
         email_input = gr.Textbox(label="Recipient Email")
         name_input = gr.Textbox(label="Recipient Name")
         summary_output = gr.Textbox(label="Agreement Summary")
         docusign_output = gr.JSON(label="DocuSign Response")
-        process_button = gr.Button("Process Agreement")
+        process_button = gr.Button("Process Agreement", elem_id="process-button")
 
-    with gr.Tab("Chatbot"):
+    with gr.Tab("Chatbot", elem_id="chatbot-tab"):
         chatbot_question_input = gr.Textbox(label="Ask a Question")
         chatbot_answer_output = gr.Textbox(label="Answer")
-        chatbot_button = gr.Button("Ask")
+        chatbot_button = gr.Button("Ask", elem_id="chatbot-button")
 
-    # Link the inputs and outputs
     process_button.click(
         main_interface,
         inputs=[file_input, email_input, name_input, chatbot_question_input, state],
@@ -223,5 +283,4 @@ with gr.Blocks() as app:
         outputs=[summary_output, docusign_output, chatbot_answer_output, state]
     )
 
-# Launch the Gradio app
 app.launch(debug=True)
