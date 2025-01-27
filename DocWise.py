@@ -195,7 +195,7 @@ def main_interface(file, recipient_email, recipient_name, question, state):
 # CSS for styling
 css = """
 .gradio-container {
-    background-image: url('https://github.com/NadaZakaria99/DocWise/blob/main/DALL%C2%B7E%202025-01-26%2011.43.33%20-%20A%20futuristic%20and%20sleek%20magical%20animated%20GIF-style%20icon%20design%20for%20'DocWise'%2C%20representing%20knowledge%2C%20documents%2C%20and%20wisdom.%20The%20design%20includes%20a%20glow%20(1).jpg');
+    background-image: url('https://huggingface.co/spaces/Nadaazakaria/DocWise/resolve/main/DALL%C2%B7E%202025-01-26%2011.43.33%20-%20A%20futuristic%20and%20sleek%20magical%20animated%20GIF-style%20icon%20design%20for%20%27DocWise%27%2C%20representing%20knowledge%2C%20documents%2C%20and%20wisdom.%20The%20design%20includes%20a%20glow.jpg');
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
