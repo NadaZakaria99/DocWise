@@ -59,4 +59,4 @@
 - **Streaming Responses:** Providing streaming responses for real-time interaction with the chatbot, improving user engagement and satisfaction.
 
 # 📝License
-DocWise is licensed under the MIT License
+DocWise is licensed under the [MIT License](LICENSE).
